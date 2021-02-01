@@ -1726,6 +1726,8 @@ conf:
       send_service_user_token: false
     libvirt:
       connection_uri: "qemu+tcp://127.0.0.1/system"
+      virt_type: qemu
+      cpu_mode: none
       images_type: qcow2
       images_rbd_pool: vms
       images_rbd_ceph_conf: /etc/ceph/ceph.conf
