@@ -324,7 +324,7 @@ type: kubernetes.io/rbd
 data:
   key: QVFDNFd3MWdNVUhTTnhBQVZIeWt1eXlETEVPa0JuTE1zZVB1V1E9PQo=
 ```
-#### configMap
+#### Create configMap
 ##### Collect ceph host network mon IP
 ```
 [root@rook-ceph-tools-77bf5b9b7d-skl4t /]# cat /etc/ceph/ceph.conf
@@ -369,5 +369,119 @@ pod:
 6e14f4ae-79a5-4562-8737-760d9b62bb44
 
 ```
+### Deploy Openvswitch
+#### No change need in values.yaml file
+```
+# kubectl label nodes compute{1..3}.brilliant.com.bd openvswitch=enabled
+```
+### login to openvswitch pod: 
+```
+# kubectl -n rook-ceph exec -it openvswitch-vswitchd-f8xh9 bash
+# root@compute2:/# ovs-vsctl show
+```
+### Deploy Libvirt
+#### Only need to label compute node
+```
+kubectl label nodes compute{1..3}.brilliant.com.bd openstack-compute-node=enabled
+```
+### Deploy Compute Kit (Nova and Neutron)
+```
+### for nova ###
+labels:
+  api_metadata:
+    node_selector_key: openstack-helm-node-class
+    node_selector_value: primary
+pod:
+  replicas:
+    api_metadata: 1
+    placement: 2
+    osapi: 2
+    conductor: 2
+    consoleauth: 2
+    scheduler: 1
+    novncproxy: 1
+conf:
+  nova:
+    libvirt:
+      virt_type: qemu
+      cpu_mode: none
+```
+### Note: above conf section is only needed if running in virtualized env      
+```      
+### for neutron   ###
+network:
+  interface:
+    tunnel: ens5
+labels:
+  agent:
+    dhcp:
+      node_selector_key: openstack-compute-node
+      node_selector_value: enabled
+    l3:
+      node_selector_key: openstack-compute-node
+      node_selector_value: enabled
+    metadata:
+      node_selector_key: openstack-compute-node
+      node_selector_value: enabled
+pod:
+  replicas:
+    server: 3
+conf:
+  neutron:
+    DEFAULT:
+      l3_ha: True
+      max_l3_agents_per_router: 1
+      l3_ha_network_type: vxlan
+      dhcp_agents_per_network: 1
+  plugins:
+    ml2_conf:
+      ml2_type_flat:
+        flat_networks: public
+    openvswitch_agent:
+      agent:
+        tunnel_types: vxlan
+      ovs:
+        bridge_mappings: public:br-ex
+```
+### Launch an instance and do ping. Login to a compute node:
+```
+root@compute1:~# ip netns
+qdhcp-80b9106d-2c99-46b9-9504-783c9d435177 (id: 3)
+root@compute1:~#
+root@compute1:~# ip netns exec qdhcp-80b9106d-2c99-46b9-9504-783c9d435177 ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+2: tunl0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0
+18: tapa512aa8b-7f: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/ether fa:16:3e:18:a1:a7 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.100.2/24 brd 192.168.100.255 scope global tapa512aa8b-7f
+       valid_lft forever preferred_lft forever
+    inet 169.254.169.254/16 brd 169.254.255.255 scope global tapa512aa8b-7f
+       valid_lft forever preferred_lft forever
+    inet6 fe80::f816:3eff:fe18:a1a7/64 scope link
+       valid_lft forever preferred_lft forever
+root@compute1:~#
+root@compute1:~# ip netns exec qdhcp-80b9106d-2c99-46b9-9504-783c9d435177 ping 192.168.100.21
+PING 192.168.100.21 (192.168.100.21) 56(84) bytes of data.
+64 bytes from 192.168.100.21: icmp_seq=36 ttl=64 time=2.76 ms
+64 bytes from 192.168.100.21: icmp_seq=37 ttl=64 time=0.855 ms
+64 bytes from 192.168.100.21: icmp_seq=38 ttl=64 time=0.843 ms
+64 bytes from 192.168.100.21: icmp_seq=39 ttl=64 time=0.693 ms
+```
 
-### Reference docs:
+### SSH login to an instance: cirros os user: cirros & pass: cubswin:)
+```
+root@compute1:~# ip netns exec qdhcp-80b9106d-2c99-46b9-9504-783c9d435177 ssh cirros@192.168.100.21
+cirros@192.168.100.21's password:
+$
+$
+$ ip r
+default via 192.168.100.1 dev eth0
+169.254.169.254 via 192.168.100.2 dev eth0
+192.168.100.0/24 dev eth0  src 192.168.100.21
+```
